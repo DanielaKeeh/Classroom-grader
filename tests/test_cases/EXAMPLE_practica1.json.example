@@ -1,0 +1,7 @@
+[
+  {"name": "facil_1_caso_1", "input": "5\n3\n", "expected_output": "8\n", "points": 20},
+  {"name": "facil_2_caso_1", "input": "20\n", "expected_output": "68.0\n", "points": 20},
+  {"name": "intermedio_1_caso_1", "input": "10\n+\n5\n", "expected_output": "15\n", "points": 20},
+  {"name": "intermedio_2_caso_1", "input": "3661\n", "expected_output": "01:01:01\n", "points": 20},
+  {"name": "dificil_caso_1", "input": "70\n1.75\n", "expected_output": "22.9\nNormal\n", "points": 20}
+]

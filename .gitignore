@@ -1,0 +1,19 @@
+# Entorno virtual de Python — nunca se sube
+.venv/
+venv/
+
+# Credenciales — NUNCA subir esto a GitHub
+credentials/client_secret.json
+credentials/token.json
+
+# Datos de alumnos — información personal, tampoco esto
+data/
+tests/test_cases/*.json
+!tests/test_cases/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Config con course_id real (sube config.example.yaml en su lugar)
+config.yaml

@@ -1,0 +1,41 @@
+# Copia este archivo a config.yaml y llena course_id una vez que exista
+# el Classroom real. config.yaml está en .gitignore a propósito.
+
+course_id: ""  # lo sacas de la URL de tu Classroom: classroom.google.com/c/<ESTE_ID>
+
+weights:
+  examen_departamental: 0.20
+  examenes_por_tema: 0.20
+  practicas: 0.20
+  investigaciones: 0.20
+  proyecto_final: 0.20
+
+compile:
+  compiler: gcc
+  flags: ["-std=c11", "-Wall", "-lm"]
+  timeout_seconds: 5
+
+scheduler:
+  check_interval_minutes: 30
+
+plagiarism:
+  enabled: true
+  similarity_threshold: 0.90
+
+claude_feedback:
+  enabled: false
+  model: claude-sonnet-5
+
+# Cada Práctica trae 5 problemas; el alumno sube un .c por problema,
+# nombrado p1.c...p5.c (según el número de problema en la imagen que le diste).
+practica:
+  problemas_por_practica: 5
+  patron_nombre_archivo: "^p([1-5])\\.c$"
+
+# Escritura de calificaciones de vuelta a Classroom.
+# auto_publish: true = el alumno ve su nota de inmediato, con notificación,
+# sin que tú la revises antes. Ponlo en false si prefieres revisar primero
+# (queda como draftGrade, solo tú la ves, y la publicas a mano en Classroom).
+classroom_write:
+  auto_publish: true
+  skip_publish_if_plagiarism_flag: true
