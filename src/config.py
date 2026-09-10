@@ -23,7 +23,7 @@ SCOPES = [
 ]
 
 DEFAULT_CONFIG = {
-    "course_id": "",
+    "course_ids": [],
     "weights": {
         "examen_departamental": 0.20,
         "examenes_por_tema": 0.20,

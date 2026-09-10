@@ -1,0 +1,6 @@
+[
+  {"name": "caso_par_negativo", "input": "-4\n", "expected_output": "Par\nNegativo\n", "points": 5},
+  {"name": "caso_impar_positivo", "input": "7\n", "expected_output": "Impar\nPositivo\n", "points": 5},
+  {"name": "caso_cero", "input": "0\n", "expected_output": "Par\nCero\n", "points": 5},
+  {"name": "caso_par_positivo", "input": "10\n", "expected_output": "Par\nPositivo\n", "points": 5}
+]

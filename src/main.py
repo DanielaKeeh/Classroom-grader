@@ -1,10 +1,10 @@
 """
-Orquestador principal. Uso:
+Orquestador principal.
 
-    python -m src.main sync        # trae de Classroom lo nuevo (tareas + entregas + p1.c...p5.c)
-    python -m src.main grade       # califica todas las entregas pendientes ya descargadas
-    python -m src.main run         # sync + grade + export en un solo paso
-    python -m src.main export      # solo regenera el Excel desde SQLite
+    python -m src.main sync        # trae de TODAS las secciones (course_ids)
+    python -m src.main grade       # califica lo pendiente
+    python -m src.main run         # sync + grade + export
+    python -m src.main export      # regenera un .xlsx POR SECCIÓN
 """
 import sys
 from pathlib import Path
@@ -20,18 +20,23 @@ def sync(course_id: str):
     client = ClassroomClient()
     db.init_db()
 
+    course_name = client.get_course_name(course_id)
+
     with db.get_conn() as conn:
+        db.upsert_course(conn, course_id, course_name)
+
         for s in client.list_students(course_id):
             profile = s["profile"]
             db.upsert_student(conn, s["userId"], profile.get("name", {}).get("fullName", "?"),
-                               profile.get("emailAddress"))
+                               profile.get("emailAddress"), course_id=course_id)
 
         for cw in client.list_coursework(course_id):
             category, unidad = infer_category_and_unit(cw.get("title", ""))
             max_points = cw.get("maxPoints", 100)
             due = cw.get("dueDate")
             due_str = f"{due['year']}-{due['month']:02d}-{due['day']:02d}" if due else None
-            db.upsert_coursework(conn, cw["id"], cw.get("title", ""), category, unidad, max_points, due_str)
+            db.upsert_coursework(conn, cw["id"], cw.get("title", ""), category, unidad, max_points,
+                                  due_str, course_id=course_id)
 
             for sub in client.list_submissions(course_id, cw["id"]):
                 problem_files = ClassroomClient.extract_problem_files(sub)
@@ -45,32 +50,30 @@ def sync(course_id: str):
                     status = "pending"
 
                 db.upsert_submission(
-                    conn,
-                    submission_id=sub["id"],
-                    student_id=sub["userId"],
-                    coursework_id=cw["id"],
-                    submitted_at=sub.get("updateTime"),
-                    late=sub.get("late", False),
-                    status=status,
+                    conn, submission_id=sub["id"], student_id=sub["userId"],
+                    coursework_id=cw["id"], submitted_at=sub.get("updateTime"),
+                    late=sub.get("late", False), status=status,
                 )
 
                 for problem_index, drive_file_id in problem_files.items():
                     dest = SUBMISSIONS_DIR / cw["id"] / sub["userId"] / f"p{problem_index}.c"
-                    client.download_drive_file(drive_file_id, dest)  # siempre baja la versión más reciente
+                    if not dest.exists():
+                        client.download_drive_file(drive_file_id, dest)
                     db.upsert_submission_file(conn, sub["id"], problem_index, drive_file_id, str(dest))
-    print("Sync completo.")
+
+    print(f"Sync completo: {course_name} ({course_id})")
+
+
+def sync_all(course_ids: list):
+    for course_id in course_ids:
+        print(f"--- Sync curso {course_id} ---")
+        sync(course_id)
 
 
 def _plagiarism_flags_por_practica(rows, cfg) -> dict[str, dict[int, tuple]]:
-    """
-    Para cada problem_index (1-5), compara ese archivo entre todos los
-    alumnos de esta tarea. Regresa {student_id: {problem_index: (otro_student_id, score)}}
-    solo para los que superan el threshold.
-    """
     flags: dict[str, dict[int, tuple]] = {}
     if not cfg["plagiarism"]["enabled"] or len(rows) < 2:
         return flags
-
     n_problemas = cfg["practica"]["problemas_por_practica"]
     with db.get_conn() as conn:
         for problem_index in range(1, n_problemas + 1):
@@ -79,21 +82,15 @@ def _plagiarism_flags_por_practica(rows, cfg) -> dict[str, dict[int, tuple]]:
                 files = db.get_submission_files(conn, r["submission_id"])
                 if problem_index in files:
                     submissions_map[r["student_id"]] = Path(files[problem_index])
-
             if len(submissions_map) < 2:
                 continue
-
             pairs = plagiarism.flag_pairs(submissions_map, cfg["plagiarism"]["similarity_threshold"])
             for student_id, (other, score) in pairs.items():
                 flags.setdefault(student_id, {})[problem_index] = (other, score)
-
     return flags
 
 
 def _log_plagiarism_alert(cfg: dict, mensaje: str):
-    """Deja un rastro persistente en un archivo, no solo en el print de
-    terminal — así te enteras aunque no estuvieras viendo la consola cuando
-    corrió el scheduler."""
     config.ensure_dirs()
     alert_path = config.DATA_DIR / "alertas_plagio.txt"
     from datetime import datetime
@@ -108,7 +105,9 @@ def grade_pending():
 
     with db.get_conn() as conn:
         pending = conn.execute(
-            "SELECT * FROM submissions WHERE status IN ('pending', 'partial_files')"
+            "SELECT s.*, cw.course_id AS coursework_course_id FROM submissions s "
+            "JOIN coursework cw ON cw.coursework_id = s.coursework_id "
+            "WHERE s.status IN ('pending', 'partial_files')"
         ).fetchall()
 
         by_coursework: dict[str, list] = {}
@@ -117,6 +116,7 @@ def grade_pending():
 
     for coursework_id, rows in by_coursework.items():
         plag_flags = _plagiarism_flags_por_practica(rows, cfg)
+        course_id_de_la_tarea = rows[0]["coursework_course_id"]
 
         with db.get_conn() as conn:
             for r in rows:
@@ -141,7 +141,6 @@ def grade_pending():
 
                 db.save_aggregate_grade(conn, r["submission_id"], total, maxp, plag_score, plag_with)
 
-                # --- Escritura de vuelta a Classroom (opcional, según config) ---
                 if classroom_client:
                     tiene_plagio = plag_score is not None
                     publicar = (
@@ -150,7 +149,7 @@ def grade_pending():
                     )
                     try:
                         classroom_client.set_grade(
-                            cfg["course_id"], coursework_id, r["submission_id"],
+                            course_id_de_la_tarea, coursework_id, r["submission_id"],
                             score=total, publish=publicar,
                         )
                         if tiene_plagio and not publicar:
@@ -158,45 +157,39 @@ def grade_pending():
                                 "SELECT full_name FROM students WHERE student_id=?", (r["student_id"],)
                             ).fetchone()
                             nombre_str = nombre["full_name"] if nombre else r["student_id"]
-                            titulo_tarea = conn.execute(
-                                "SELECT title FROM coursework WHERE coursework_id=?", (coursework_id,)
-                            ).fetchone()
-                            titulo_str = titulo_tarea["title"] if titulo_tarea else coursework_id
-                            mensaje = (
-                                f"PLAGIO DETECTADO — {nombre_str} en '{titulo_str}' "
-                                f"(similitud {plag_score:.2f} con {plag_with}). "
-                                f"Nota calculada: {total}/{maxp} (SOLO como borrador, no publicada)."
-                            )
-                            _log_plagiarism_alert(cfg, mensaje)
-                            print(f"  [PLAGIO - NO publicado, alerta guardada] {nombre_str}")
+                            _log_plagiarism_alert(cfg, f"PLAGIO — {nombre_str} en '{coursework_id}' "
+                                                        f"(similitud {plag_score:.2f} con {plag_with}). "
+                                                        f"Nota: {total}/{maxp} (borrador, no publicada).")
+                            print(f"  [PLAGIO - alerta guardada] {nombre_str}")
                         elif publicar:
-                            print(f"  [PUBLICADO] submission {r['submission_id']}: {total}/{maxp}")
+                            print(f"  [PUBLICADO] {r['submission_id']}: {total}/{maxp}")
                         else:
-                            print(f"  [BORRADOR] submission {r['submission_id']}: {total}/{maxp}")
+                            print(f"  [BORRADOR] {r['submission_id']}: {total}/{maxp}")
                     except Exception as e:
-                        print(f"  [ERROR al escribir en Classroom] submission {r['submission_id']}: {e}")
+                        print(f"  [ERROR al escribir en Classroom] {r['submission_id']}: {e}")
 
     print("Calificación completa.")
 
 
-def run(course_id: str):
-    sync(course_id)
+def run_all(course_ids: list):
+    sync_all(course_ids)
     grade_pending()
-    path = export_excel.export()
-    print(f"Reporte actualizado en {path}")
+    paths = export_excel.export()
+    print(f"Reportes actualizados: {[str(p) for p in paths]}")
 
 
 if __name__ == "__main__":
     cfg = config.load_config()
     action = sys.argv[1] if len(sys.argv) > 1 else "run"
+    course_ids = cfg["course_ids"]
 
     if action == "sync":
-        sync(cfg["course_id"])
+        sync_all(course_ids)
     elif action == "grade":
         grade_pending()
     elif action == "export":
         export_excel.export()
     elif action == "run":
-        run(cfg["course_id"])
+        run_all(course_ids)
     else:
         print(f"Acción desconocida: {action}. Usa sync | grade | export | run")

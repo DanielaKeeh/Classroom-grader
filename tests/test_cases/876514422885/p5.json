@@ -1,0 +1,5 @@
+[
+  {"name": "caso_bisiesto_febrero", "input": "2024\n2\n", "expected_output": "Bisiesto\n29\n", "points": 7},
+  {"name": "caso_no_bisiesto_febrero", "input": "2023\n2\n", "expected_output": "No bisiesto\n28\n", "points": 7},
+  {"name": "caso_mes_31_dias", "input": "2025\n7\n", "expected_output": "No bisiesto\n31\n", "points": 6}
+]

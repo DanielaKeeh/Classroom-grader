@@ -1,0 +1,6 @@
+[
+  {"name": "caso_normal", "input": "70\n1.75\n", "expected_output": "22.9\nNormal\n", "points": 5},
+  {"name": "caso_bajo_peso", "input": "50\n1.75\n", "expected_output": "16.3\nBajo peso\n", "points": 5},
+  {"name": "caso_frontera_sobrepeso", "input": "100\n2.0\n", "expected_output": "25.0\nSobrepeso\n", "points": 5},
+  {"name": "caso_obesidad", "input": "100\n1.5\n", "expected_output": "44.4\nObesidad\n", "points": 5}
+]

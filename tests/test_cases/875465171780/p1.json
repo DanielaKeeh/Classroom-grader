@@ -1,0 +1,5 @@
+[
+  {"name": "caso_normal", "input": "5.0\n3.0\n", "expected_output": "15.00\n16.00\n", "points": 8},
+  {"name": "caso_decimales", "input": "2.5\n4.2\n", "expected_output": "10.50\n13.40\n", "points": 8},
+  {"name": "caso_valores_pequenos", "input": "0.1\n0.1\n", "expected_output": "0.01\n0.40\n", "points": 4}
+]

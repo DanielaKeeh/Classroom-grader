@@ -1,0 +1,5 @@
+[
+  {"name": "caso_normal", "input": "3661\n", "expected_output": "01:01:01\n", "points": 7},
+  {"name": "caso_cero", "input": "0\n", "expected_output": "00:00:00\n", "points": 7},
+  {"name": "caso_maximo", "input": "359999\n", "expected_output": "99:59:59\n", "points": 6}
+]

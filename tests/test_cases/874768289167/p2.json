@@ -1,0 +1,7 @@
+[
+  {"name": "caso_A", "input": "95\n", "expected_output": "A\n", "points": 4},
+  {"name": "caso_B", "input": "85\n", "expected_output": "B\n", "points": 4},
+  {"name": "caso_C", "input": "72\n", "expected_output": "C\n", "points": 4},
+  {"name": "caso_D", "input": "65\n", "expected_output": "D\n", "points": 4},
+  {"name": "caso_F", "input": "40\n", "expected_output": "F\n", "points": 4}
+]

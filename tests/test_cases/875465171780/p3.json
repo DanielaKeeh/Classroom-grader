@@ -1,0 +1,6 @@
+[
+  {"name": "caso_suma", "input": "10\n+\n5\n", "expected_output": "15\n", "points": 5},
+  {"name": "caso_resta", "input": "10\n-\n5\n", "expected_output": "5\n", "points": 5},
+  {"name": "caso_multiplicacion", "input": "10\n*\n5\n", "expected_output": "50\n", "points": 5},
+  {"name": "caso_division_entera_trunca", "input": "7\n/\n2\n", "expected_output": "3\n", "points": 5}
+]

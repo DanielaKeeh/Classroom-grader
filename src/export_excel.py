@@ -1,9 +1,8 @@
 """
-Genera un .xlsx a partir de SQLite: Resumen (promedio ponderado final),
-una hoja por categoría en formato pivote (alumno x tarea), y una hoja de
-Detalle_Problemas con el desglose de cada uno de los 5 problemas por
-entrega — para que puedas ver exactamente dónde falló cada quien.
+Genera UN archivo .xlsx POR SECCIÓN (course_id) — ya no se mezclan los
+alumnos de D16 y D23 en el mismo Excel.
 """
+import re
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -29,20 +28,27 @@ def _autofit(ws):
         ws.column_dimensions[get_column_letter(col_cells[0].column)].width = min(max(length + 2, 10), 45)
 
 
-def build_workbook(cfg: dict) -> Workbook:
+def _safe_filename(name: str) -> str:
+    return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+
+
+def build_workbook_for_course(cfg: dict, course_id: str) -> Workbook:
     wb = Workbook()
     wb.remove(wb.active)
 
     with db.get_conn() as conn:
+        students = conn.execute(
+            "SELECT student_id, full_name FROM students WHERE course_id=? ORDER BY full_name",
+            (course_id,),
+        ).fetchall()
+
         # --- Resumen ---
         ws = wb.create_sheet("Resumen")
         categories = list(cfg["weights"].keys())
         ws.append(["Alumno", *[f"{c} ({int(cfg['weights'][c]*100)}%)" for c in categories], "Final"])
         _style_header(ws)
 
-        students = conn.execute("SELECT student_id, full_name FROM students ORDER BY full_name").fetchall()
-        finals = db.compute_final_grades(conn, cfg["weights"])
-
+        finals = db.compute_final_grades(conn, cfg["weights"], course_id=course_id)
         for s in students:
             data = finals.get(s["student_id"], {"final": 0.0, "breakdown": {}})
             row = [s["full_name"]]
@@ -53,36 +59,34 @@ def build_workbook(cfg: dict) -> Workbook:
             ws.append(row)
         _autofit(ws)
 
-        # --- Una hoja por categoría, en formato PIVOTE: alumno x tarea ---
+        # --- Una hoja por categoría, formato pivote: alumno x tarea (solo de esta sección) ---
         for category in categories:
             ws = wb.create_sheet(category[:31])
 
             courseworks = conn.execute(
-                "SELECT coursework_id, title, unidad FROM coursework WHERE category = ? ORDER BY unidad, title",
-                (category,),
+                "SELECT coursework_id, title, unidad FROM coursework "
+                "WHERE category = ? AND course_id = ? ORDER BY unidad, title",
+                (category, course_id),
             ).fetchall()
 
             headers = ["Alumno"] + [cw["title"] for cw in courseworks] + ["Promedio"]
             ws.append(headers)
             _style_header(ws)
 
-            # {(student_id, coursework_id): (score_raw, max_points, plagiarism_score)}
             scores = {}
             rows = conn.execute(
                 """
-                SELECT s.student_id, s.coursework_id, g.score_raw, cw.max_points,
-                       g.plagiarism_score
+                SELECT s.student_id, s.coursework_id, g.score_raw, cw.max_points, g.plagiarism_score
                 FROM grades g
                 JOIN submissions s ON s.submission_id = g.submission_id
                 JOIN coursework cw ON cw.coursework_id = s.coursework_id
-                WHERE cw.category = ?
+                WHERE cw.category = ? AND cw.course_id = ?
                 """,
-                (category,),
+                (category, course_id),
             ).fetchall()
             for r in rows:
                 scores[(r["student_id"], r["coursework_id"])] = (r["score_raw"], r["max_points"], r["plagiarism_score"])
 
-            students = conn.execute("SELECT student_id, full_name FROM students ORDER BY full_name").fetchall()
             for st in students:
                 row_idx = ws.max_row + 1
                 row_values = [st["full_name"]]
@@ -99,14 +103,13 @@ def build_workbook(cfg: dict) -> Workbook:
                 row_values.append(promedio)
                 ws.append(row_values)
 
-                # Resaltar en rosa cualquier celda de esa fila con plagio marcado
                 for col_idx, cw in enumerate(courseworks, start=2):
                     entry = scores.get((st["student_id"], cw["coursework_id"]))
                     if entry and entry[2] and entry[2] >= cfg["plagiarism"]["similarity_threshold"]:
                         ws.cell(row=row_idx, column=col_idx).fill = FLAG_FILL
             _autofit(ws)
 
-        # --- Detalle por problema ---
+        # --- Detalle por problema (solo de esta sección) ---
         ws = wb.create_sheet("Detalle_Problemas")
         ws.append(["Alumno", "Tarea", "Problema", "Compiló", "Tests", "Puntos", "Feedback"])
         _style_header(ws)
@@ -119,8 +122,10 @@ def build_workbook(cfg: dict) -> Workbook:
             JOIN submissions s ON s.submission_id = pg.submission_id
             JOIN students st ON st.student_id = s.student_id
             JOIN coursework cw ON cw.coursework_id = s.coursework_id
+            WHERE st.course_id = ?
             ORDER BY cw.unidad, st.full_name, pg.problem_index
-            """
+            """,
+            (course_id,),
         ).fetchall()
 
         for r in rows:
@@ -141,8 +146,22 @@ def build_workbook(cfg: dict) -> Workbook:
 
 
 def export():
+    """Genera un .xlsx por cada sección que tenga alumnos registrados.
+    Regresa la lista de rutas generadas."""
     cfg = config.load_config()
-    wb = build_workbook(cfg)
     config.ensure_dirs()
-    wb.save(config.EXCEL_PATH)
-    return config.EXCEL_PATH
+
+    with db.get_conn() as conn:
+        course_ids = db.get_all_course_ids(conn)
+        course_names = {cid: db.get_course_name(conn, cid) for cid in course_ids}
+
+    paths = []
+    for course_id in course_ids:
+        wb = build_workbook_for_course(cfg, course_id)
+        nombre_archivo = f"calificaciones_{_safe_filename(course_names[course_id])}_{course_id[-6:]}.xlsx"
+        path = config.DATA_DIR / nombre_archivo
+        wb.save(path)
+        paths.append(path)
+        print(f"  Generado: {path}")
+
+    return paths

@@ -41,6 +41,15 @@ class ClassroomClient:
         resp = self.classroom.courses().list().execute()
         return resp.get("courses", [])
 
+    def get_course_name(self, course_id: str) -> str:
+        """Trae el nombre real del curso (ej. 'Programación Estructurada D23'),
+        para usarlo en el nombre del archivo Excel en vez del course_id crudo."""
+        try:
+            course = self.classroom.courses().get(id=course_id).execute()
+            return course.get("name", course_id)
+        except Exception:
+            return course_id
+
     def list_students(self, course_id: str):
         students, page_token = [], None
         while True:
@@ -89,24 +98,11 @@ class ClassroomClient:
 
     def set_grade(self, course_id: str, coursework_id: str, submission_id: str,
                    score: float, publish: bool = False):
-        """
-        Escribe la calificación en Classroom.
-
-        publish=False (default): solo pone draftGrade. Es una nota "borrador"
-        que SOLO el profesor ve en Classroom — el alumno no se entera, no
-        hay notificación. Úsalo para revisar antes de soltarlo.
-
-        publish=True: pone assignedGrade (la nota real) Y llama a
-        studentSubmissions().return_() para "devolver" la entrega — esto SÍ
-        notifica al alumno de inmediato y ya no hay vuelta atrás en la
-        notificación (la nota se puede corregir después, pero el aviso ya se mandó).
-        """
         body = {"draftGrade": score}
         self.classroom.courses().courseWork().studentSubmissions().patch(
             courseId=course_id, courseWorkId=coursework_id, id=submission_id,
             updateMask="draftGrade", body=body,
         ).execute()
-
         if publish:
             self.classroom.courses().courseWork().studentSubmissions().patch(
                 courseId=course_id, courseWorkId=coursework_id, id=submission_id,
@@ -118,18 +114,8 @@ class ClassroomClient:
 
     @staticmethod
     def extract_problem_files(submission: dict, patron: str = r"^p([1-5])\.c$") -> dict[int, str]:
-        """
-        Escanea los adjuntos de una entrega y regresa {problem_index: drive_file_id}
-        para cada archivo que respete la convención p1.c...p5.c (sin importar
-        mayúsculas/minúsculas). Archivos que no calzan con el patrón (nombre
-        distinto, no es .c, es un .zip, una foto, etc.) se IGNORAN aquí a
-        propósito — quedan fuera del diccionario, así que ese problema se
-        califica con 0 (ver grader.grade_practica) y tú puedes revisarlos a
-        mano si algo se ve raro en el reporte.
-        """
         found: dict[int, str] = {}
         regex = re.compile(patron, re.IGNORECASE)
-
         for attachment in submission.get("assignmentSubmission", {}).get("attachments", []):
             drive_file = attachment.get("driveFile")
             if not drive_file:
@@ -139,5 +125,4 @@ class ClassroomClient:
             if match:
                 problem_index = int(match.group(1))
                 found[problem_index] = drive_file.get("id")
-
         return found
